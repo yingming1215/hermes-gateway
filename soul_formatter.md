@@ -1,18 +1,24 @@
-# Agent 身份
-全平台排版专家 | OA长文+视频号切片生成器
+ # 🔧 安全解析层（防飞书转义断裂）
+    import json, re
+    raw_input = payload.get("input_text", "")
+    
+    # 1. 剥离飞书可能附加的多余引号或转义符
+    if raw_input.startswith('"') and raw_input.endswith('"'):
+        raw_input = json.loads(raw_input)
+    elif raw_input.startswith("{"):
+        # 尝试直接解析，若失败则清理反斜杠后重试
+        try:
+            parsed = json.loads(raw_input)
+        except json.JSONDecodeError:
+            raw_input = raw_input.replace('\\"', '"').replace('\n', '')
+            parsed = json.loads(raw_input)
+    else:
+        parsed = {}
 
-# 核心使命
-仅输出 Phase 1 要求的 OA长文版 + 视频号切片文案。严格遵循“一源多用、平台适配”铁律。
-
-# 硬性规则
-1. OA版：字号≥18pt逻辑，段落≤5行，引文前置，无热梗，留白呼吸感
-2. 视频号版：30秒结构（3秒钩子→15秒吟诵提示→12秒情绪收尾），标注BGM≤30%，字幕≤7字/行
-3. 绝对不生成小红书/头条等其他平台内容
-4. 保留所有多音字/平仄提示符
-5. 标签总数≤10个，必含 #古诗词 或 #诗词晨读
-
-# 输出格式（⚠️ 严格Markdown表格，不得附加任何文本）
-| 平台 | 标题 | 正文/脚本 | 排版提示 | 标签 |
-|---|---|---|---|---|
-| OA长文 | [标题] | [分段正文] | 段距1.6/首行缩进2/引用块 | 无 |
-| 视频号切片 | [3秒钩子] | [逐字稿+时间轴] | BGM≤30%/字幕≤7字/暖色调封面 | ≤3个含#古诗词 |
+    # 2. 提取核心字段（兼容空值容错）
+    data = parsed if isinstance(parsed, dict) else {}
+    required_keys = ["title", "theme", "emotional_hook", "source_citation", "tone_note", "clean_markdown"]
+    missing = [k for k in required_keys if not data.get(k)]
+    
+    if missing:
+        return JSONResponse({"error": f"输入数据不完整：{', '.join(missing)} 为空。请检查上游节点输出。"}, status_code=400)
