@@ -1,5 +1,14 @@
-<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Cache-Control" content="no-cache"><title>Hermes Console</title>
-<style>body{font-family:system-ui;background:#f8fafc;margin:0;padding:16px;color:#111827}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Hermes Console v0.13.0</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;margin:0;padding:16px;color:#111827}
 .card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:12px}
 h2{margin:0 0 10px;color:#2563eb;font-size:16px}
 textarea{width:100%;min-height:90px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-family:monospace;resize:vertical;box-sizing:border-box}
@@ -8,23 +17,56 @@ button:hover{background:#1d4ed8}button:disabled{opacity:.5}
 .badge{padding:2px 6px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff}
 .s{background:#10b981}.f{background:#ef4444}.r{background:#f59e0b}
 details{margin-top:8px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
-summary{padding:8px 10px;cursor:pointer;background:#f8fafc;font-size:12px;font-weight:500}
-pre{margin:0;padding:10px;background:#0f172a;color:#e2e8f0;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap}</style></head>
+summary{padding:8px 10px;cursor:pointer;background:#f8fafc;font-size:12px;font-weight:500;user-select:none}
+summary:hover{background:#f1f5f9}
+pre{margin:0;padding:10px;background:#0f172a;color:#e2e8f0;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap}
+</style>
+</head>
 <body>
-<div class="card"><h2>🚀 触发工作流</h2><textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea><button id="btn" onclick="go()">▶ 启动</button><div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div></div>
-<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 运行记录</h2><button style="background:#fff;color:#2563eb;border:1px solid #2563eb" onclick="load()">🔄 刷新</button></div>
+<div class="card">
+  <h2>🚀 触发工作流</h2>
+  <textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea>
+  <button id="btn" onclick="go()">▶ 启动</button>
+  <div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div>
+</div>
+
+<div class="card" style="display:flex;justify-content:space-between;align-items:center">
+  <h2 style="margin:0">📜 运行记录</h2>
+  <button style="background:#fff;color:#2563eb;border:1px solid #2563eb" onclick="load()">🔄 刷新</button>
+</div>
 <div class="card" style="padding-top:0"><div id="list"><p style="color:#94a3b8;font-size:12px">暂无记录</p></div></div>
+
 <script>
 async function go(){
   const b=document.getElementById('btn'),t=document.getElementById('txt').value;
   if(!t.trim())return alert('请输入内容');
-  b.disabled=true;b.textContent='⏳ 处理中...';document.getElementById('st').innerHTML='<span style="color:#2563eb">冷启动约30s...</span>';
-  try{const r=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});const d=await r.json();document.getElementById('st').innerHTML=`<span class="badge ${d.status==='success'?'s':(d.status==='failed'?'f':'r')}">${d.status.toUpperCase()}</span> ${d.elapsed_sec}s`;load()}catch(e){document.getElementById('st').innerText='❌ 请求失败'}finally{b.disabled=false;b.textContent='▶ 启动'}
+  b.disabled=true;b.textContent='⏳ 处理中...';
+  document.getElementById('st').innerHTML='<span style="color:#2563eb">冷启动约30s，请耐心等待...</span>';
+  try{
+    const r=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
+    const d=await r.json();
+    document.getElementById('st').innerHTML=`<span class="badge ${d.status==='success'?'s':(d.status==='failed'?'f':'r')}">${d.status.toUpperCase()}</span> ${d.elapsed_sec}s | ${d.run_id}`;
+    if(d.error) document.getElementById('st').innerHTML+=`<br><span style="color:#ef4444">❌ ${d.error}</span>`;
+    load();
+  }catch(e){document.getElementById('st').innerText='❌ 请求失败'}
+  finally{b.disabled=false;b.textContent='▶ 启动'}
 }
+
 async function load(){
-  try{const r=await fetch('/api/v1/runs?t='+Date.now()),d=await r.json();const l=document.getElementById('list');
-  if(!d.runs?.length){l.innerHTML='<p style="color:#94a3b8;font-size:12px">暂无记录</p>';return}
-  l.innerHTML=d.runs.map(x=>`<details><summary><span class="badge ${x.status==='success'?'s':(x.status==='failed'?'f':'r')}">${x.status}</span> ${x.run_id} (${x.elapsed_sec}s)</summary><pre>${JSON.stringify(x,null,2)}</pre></details>`).join('')}catch(e){console.error(e)}
+  try{
+    const r=await fetch('/api/v1/runs?t='+Date.now()),d=await r.json();
+    const l=document.getElementById('list');
+    if(!d.runs?.length){l.innerHTML='<p style="color:#94a3b8;font-size:12px">暂无记录</p>';return}
+    l.innerHTML=d.runs.map(x=>{
+      try {
+        return `<details><summary><span class="badge ${x.status==='success'?'s':(x.status==='failed'?'f':'r')}">${x.status}</span> ${x.run_id} (${x.elapsed_sec}s)</summary><pre>${JSON.stringify(x,null,2)}</pre></details>`;
+      } catch(e) {
+        return `<details><summary><span class="badge f">渲染异常</span> ${x.run_id || 'unknown'}</summary><pre>${String(x).substring(0,300)}</pre></details>`;
+      }
+    }).join('');
+  }catch(e){console.error('列表加载失败',e)}
 }
 window.onload=load;
-</script></body></html>
+</script>
+</body>
+</html>
