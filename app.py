@@ -60,7 +60,7 @@ def load_prompt(name: str) -> str:
     if path.exists():
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
-    return f"你是一个专业的{soul_{name}}助手。请严格按要求输出JSON。"
+    return f"你是一个专业的 {name} 助手。请严格按要求输出 JSON。"
 
 async def call_llm(system_prompt: str, user_prompt: str, timeout: int = 45) -> str:
     try:
