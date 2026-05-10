@@ -1,78 +1,30 @@
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<title>Hermes Console v0.13.0</title>
-<style>
-body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;margin:0;padding:20px;color:#111827}
-.card{background:#fff;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:16px}
-h2{margin:0 0 12px;color:#2563eb;font-size:17px}
-textarea{width:100%;min-height:100px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;font-family:monospace;resize:vertical;box-sizing:border-box}
-button{background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:500;margin-top:8px}
-button:hover{background:#1d4ed8}button:disabled{opacity:0.5;cursor:not-allowed}
-.refresh-btn{background:#fff;color:#2563eb;border:1px solid #2563eb;padding:6px 12px;margin-left:8px}
-.run-item{border-bottom:1px solid #e5e7eb;padding:10px 0}.run-item:last-child{border:none}
-.badge{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:bold;color:#fff}
-.success{background:#10b981} .failed{background:#ef4444} .running{background:#f59e0b}
-.json-box{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;overflow:auto;max-height:350px;font-size:12px;margin-top:8px;white-space:pre-wrap;word-break:break-all;display:none}
-.json-box.show{display:block}
-.action-btn{background:transparent;border:1px solid #94a3b8;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;margin-left:6px}
-</style></head>
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Cache-Control" content="no-cache"><title>Hermes Console</title>
+<style>body{font-family:system-ui;background:#f8fafc;margin:0;padding:16px;color:#111827}
+.card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:12px}
+h2{margin:0 0 10px;color:#2563eb;font-size:16px}
+textarea{width:100%;min-height:90px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-family:monospace;resize:vertical;box-sizing:border-box}
+button{background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;margin-top:6px}
+button:hover{background:#1d4ed8}button:disabled{opacity:.5}
+.badge{padding:2px 6px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff}
+.s{background:#10b981}.f{background:#ef4444}.r{background:#f59e0b}
+details{margin-top:8px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
+summary{padding:8px 10px;cursor:pointer;background:#f8fafc;font-size:12px;font-weight:500}
+pre{margin:0;padding:10px;background:#0f172a;color:#e2e8f0;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap}</style></head>
 <body>
-<div class="card"><h2>🚀 Hermes Agent 控制台</h2>
-<label>输入文本：</label><textarea id="inputText" placeholder="粘贴晨读/策划内容..."></textarea>
-<button id="runBtn" onclick="runFlow()">▶ 启动</button>
-<div id="status" style="margin-top:8px;font-size:13px;color:#64748b"></div></div>
-
-<div class="card" style="display:flex;justify-content:space-between;align-items:center">
-  <h2 style="margin:0">📜 运行记录</h2>
-  <button class="refresh-btn" onclick="loadRuns()">🔄 刷新</button>
-</div>
-<div class="card" style="padding-top:0"><div id="runsList"><p style="color:#94a3b8">暂无记录</p></div></div>
-
+<div class="card"><h2>🚀 触发工作流</h2><textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea><button id="btn" onclick="go()">▶ 启动</button><div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div></div>
+<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 运行记录</h2><button style="background:#fff;color:#2563eb;border:1px solid #2563eb" onclick="load()">🔄 刷新</button></div>
+<div class="card" style="padding-top:0"><div id="list"><p style="color:#94a3b8;font-size:12px">暂无记录</p></div></div>
 <script>
-async function runFlow(){
-  const btn=document.getElementById('runBtn'),txt=document.getElementById('inputText').value;
-  if(!txt.trim()){alert('请输入内容');return}
-  btn.disabled=true;btn.textContent='⏳ 处理中...';
-  document.getElementById('status').innerHTML='<span style="color:#2563eb">冷启动约30s，请耐心等待...</span>';
-  try{
-    const res=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
-    const d=await res.json();
-    document.getElementById('status').innerHTML=`<span class="badge ${d.status==='success'?'success':(d.status==='failed'?'failed':'running')}">${d.status.toUpperCase()}</span> 耗时: ${d.elapsed_sec}s | ID: ${d.run_id}`;
-    if(d.files_exported?.length) document.getElementById('status').innerHTML+=`<br>📁 ${d.files_exported.join(' | ')}`;
-    if(d.error) document.getElementById('status').innerHTML+=`<br><span style="color:#ef4444">❌ ${d.error}</span>`;
-    loadRuns();
-  }catch(e){document.getElementById('status').innerText='❌ 请求失败';}
-  finally{btn.disabled=false;btn.textContent='▶ 启动';}
+async function go(){
+  const b=document.getElementById('btn'),t=document.getElementById('txt').value;
+  if(!t.trim())return alert('请输入内容');
+  b.disabled=true;b.textContent='⏳ 处理中...';document.getElementById('st').innerHTML='<span style="color:#2563eb">冷启动约30s...</span>';
+  try{const r=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});const d=await r.json();document.getElementById('st').innerHTML=`<span class="badge ${d.status==='success'?'s':(d.status==='failed'?'f':'r')}">${d.status.toUpperCase()}</span> ${d.elapsed_sec}s`;load()}catch(e){document.getElementById('st').innerText='❌ 请求失败'}finally{b.disabled=false;b.textContent='▶ 启动'}
 }
-
-function toggle(id,e){if(e)e.preventDefault();const el=document.getElementById('j-'+id);el?.classList.toggle('show');}
-
-async function loadRuns(){
-  try{
-    const res=await fetch('/api/v1/runs?t='+Date.now()),d=await res.json();
-    const list=document.getElementById('runsList');
-    if(!d.runs?.length){list.innerHTML='<p style="color:#94a3b8">暂无记录</p>';return}
-    list.innerHTML=d.runs.map(r=>`
-      <div class="run-item">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-          <strong style="font-size:13px">${r.run_id}</strong>
-          <div>
-            <span class="badge ${r.status==='success'?'success':(r.status==='failed'?'failed':'running')}">${r.status}</span>
-            <span style="font-size:11px;color:#64748b;margin-left:4px">${r.elapsed_sec}s</span>
-            <button class="action-btn" onclick="toggle('${r.run_id}',event)">🔍 展开</button>
-            <a class="action-btn" href="/api/v1/runs/${r.run_id}.json" download style="text-decoration:none">⬇️ 下载</a>
-          </div>
-        </div>
-        ${r.error?`<div style="color:#ef4444;font-size:11px;margin-top:3px">❌ ${r.error}</div>`:''}
-        <pre id="j-${r.run_id}" class="json-box">${JSON.stringify(r,null,2)}</pre>
-      </div>
-    `).join('');
-  }catch(e){console.error(e)}
+async function load(){
+  try{const r=await fetch('/api/v1/runs?t='+Date.now()),d=await r.json();const l=document.getElementById('list');
+  if(!d.runs?.length){l.innerHTML='<p style="color:#94a3b8;font-size:12px">暂无记录</p>';return}
+  l.innerHTML=d.runs.map(x=>`<details><summary><span class="badge ${x.status==='success'?'s':(x.status==='failed'?'f':'r')}">${x.status}</span> ${x.run_id} (${x.elapsed_sec}s)</summary><pre>${JSON.stringify(x,null,2)}</pre></details>`).join('')}catch(e){console.error(e)}
 }
-window.onload=loadRuns;
+window.onload=load;
 </script></body></html>
