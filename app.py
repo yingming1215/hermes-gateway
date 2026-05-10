@@ -1,11 +1,11 @@
-import os, json, asyncio, logging, datetime, traceback
+import os, json, asyncio, logging, datetime, traceback, time, re
 from pathlib import Path
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 import aiofiles
 
 # ================= 配置 =================
@@ -32,16 +32,6 @@ app = FastAPI(title="Hermes Gateway v1.0", version="0.13.0")
 app.mount("/ui", StaticFiles(directory="ui"), name="ui")
 
 # ================= 数据契约 =================
-class CuratorInput(BaseModel):
-    raw_text: str = Field(..., min_length=10)
-
-class FormatterInput(BaseModel):
-    theme: str
-    emotional_hook: str
-    source_citation: str
-    tone_note: str
-    clean_markdown: str
-
 class RunResult(BaseModel):
     run_id: str
     status: str
@@ -63,25 +53,19 @@ def load_prompt(name: str) -> str:
     return f"你是一个专业的 {name} 助手。请严格按要求输出 JSON。"
 
 async def call_llm(system_prompt: str, user_prompt: str, timeout: int = 45) -> str:
-    try:
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=MODEL,
-                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                temperature=0.3,
-                max_tokens=4000
-            ),
-            timeout=timeout
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"LLM调用失败: {str(e)}")
-        raise
+    response = await asyncio.wait_for(
+        client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=0.3,
+            max_tokens=4000
+        ),
+        timeout=timeout
+    )
+    return response.choices[0].message.content.strip()
 
 def parse_json_safe(raw: str) -> Dict:
-    import re
     if not raw: return {}
-    # 1. 剥离 Markdown 标记与前后杂质
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         parts = cleaned.split("```", 1)
@@ -89,56 +73,45 @@ def parse_json_safe(raw: str) -> Dict:
         if cleaned.lower().startswith("json"): cleaned = cleaned[4:].strip()
         if cleaned.endswith("```"): cleaned = cleaned[:-3].strip()
     
-    # 2. 提取首个完整 {} 块
     match = re.search(r'\{.*\}', cleaned, re.DOTALL)
     target = match.group(0) if match else cleaned
     
-    # 3. 强解析 + 常见 LLM 错误自愈
     try:
         return json.loads(target)
     except json.JSONDecodeError:
         try:
-            # 修复1：替换真实换行为转义符
             target = target.replace('\n', '\\n').replace('\r', '')
-            # 修复2：剔除尾随逗号（如 ,"key": "val" }）
             target = re.sub(r',\s*([}\]])', r'\1', target)
             return json.loads(target)
         except Exception as e:
-            logger.warning(f"JSON解析失败: {str(e)[:50]} | 原始输出: {raw[:80]}...")
-            return {}  # 兜底返回空字典，绝不让流程崩溃
-
+            logger.warning(f"JSON解析失败: {str(e)[:50]}")
+            return {}
 
 # ================= Agent Worker =================
 async def worker_curator(raw_text: str) -> Dict:
     prompt = load_prompt("curator")
-    llm_out = await call_llm(prompt, raw_text)
-    return parse_json_safe(llm_out)
+    return parse_json_safe(await call_llm(prompt, raw_text))
 
 async def worker_formatter(data: Dict) -> Dict:
     prompt = load_prompt("formatter")
-    user_text = json.dumps(data, ensure_ascii=False, indent=2)
-    llm_out = await call_llm(prompt, user_text)
-    return parse_json_safe(llm_out)
+    return parse_json_safe(await call_llm(prompt, json.dumps(data, ensure_ascii=False, indent=2)))
 
 async def worker_exporter(run_id: str, output: Dict) -> list:
     exported = []
     inbox = VAULT_PATH / "inbox"
     
-    # 抖音口播稿
     if "douyin_script" in output:
         path = inbox / f"{run_id}_douyin.md"
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             await f.write(f"# 抖音口播稿\n\n{output['douyin_script']}\n")
         exported.append(str(path))
         
-    # 公众号长文
     if "oa_long_article" in output:
         path = inbox / f"{run_id}_oa_long.md"
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             await f.write(f"# 公众号长文\n\n{output['oa_long_article']}\n")
         exported.append(str(path))
         
-    # 视频号分镜
     if "video_short" in output:
         path = inbox / f"{run_id}_video_short.md"
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
@@ -155,7 +128,7 @@ async def root():
 async def trigger_pipeline(request: Request):
     run_id = get_run_id()
     run_log_path = RUNS_PATH / f"{run_id}.json"
-    start = asyncio.get_event_loop().time()
+    start = time.monotonic()
     result = RunResult(run_id=run_id, status="running")
     
     try:
@@ -164,41 +137,33 @@ async def trigger_pipeline(request: Request):
         if not raw or len(raw) < 10:
             raise ValueError("输入文本过短或为空")
             
-        # Step 1: 策展
         logger.info(f"[{run_id}] 启动 Curator")
-        cur_data = await worker_curator(raw)
-        result.curator_output = cur_data
+        result.curator_output = await worker_curator(raw)
         
-        # Step 2: 排版
         logger.info(f"[{run_id}] 启动 Formatter")
-        fmt_data = await worker_formatter(cur_data)
-        result.formatter_output = fmt_data
+        result.formatter_output = await worker_formatter(result.curator_output)
         
-        # Step 3: 导出
         logger.info(f"[{run_id}] 启动 Exporter")
-        files = await worker_exporter(run_id, fmt_data)
-        result.files_exported = files
+        result.files_exported = await worker_exporter(run_id, result.formatter_output)
         result.status = "success"
         
     except Exception as e:
         result.status = "failed"
         result.error = f"{type(e).__name__}: {str(e)}"
         logger.error(f"[{run_id}] 流程失败: {traceback.format_exc()}")
-            finally:
-            result.elapsed_sec = round(asyncio.get_event_loop().time() - start, 2)
-            # 🔧 强容错落盘：即使 JSON 序列化失败，也强制写入原始 dict 防丢失
-            try:
-                log_data = result.model_dump()
-            except Exception:
-                log_data = {"run_id": run_id, "status": result.status, "error": "序列化异常", "elapsed_sec": result.elapsed_sec}
-            try:
-                async with aiofiles.open(run_log_path, "w", encoding="utf-8") as f:
-                    await f.write(json.dumps(log_data, ensure_ascii=False, indent=2, default=str))
-                logger.info(f"[{run_id}] 日志已落盘: {run_log_path}")
-            except Exception as e:
-                logger.error(f"[{run_id}] 落盘失败: {e}")
+    finally:
+        result.elapsed_sec = round(time.monotonic() - start, 2)
+        # 强容错落盘：序列化失败自动降级
+        try:
+            log_data = result.model_dump()
+        except Exception:
+            log_data = {"run_id": run_id, "status": result.status, "error": "序列化异常", "elapsed_sec": result.elapsed_sec}
+        try:
+            async with aiofiles.open(run_log_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(log_data, ensure_ascii=False, indent=2, default=str))
+        except Exception as e:
+            logger.error(f"[{run_id}] 落盘失败: {e}")
 
-            
     return JSONResponse(result.model_dump())
 
 @app.get("/api/v1/runs")
@@ -206,7 +171,7 @@ async def list_runs():
     runs = []
     if RUNS_PATH.exists():
         for f in sorted(RUNS_PATH.glob("*.json"), reverse=True)[:20]:
-            async with aiofiles.open(f, "r") as fh:
+            async with aiofiles.open(f, "r", encoding="utf-8") as fh:
                 data = await fh.read()
                 runs.append(json.loads(data))
     return JSONResponse({"runs": runs})
@@ -214,11 +179,8 @@ async def list_runs():
 @app.get("/ui")
 async def serve_ui():
     path = Path("ui/index.html")
-    if not path.exists():
-        return HTMLResponse("<h1>Web UI not deployed. Please upload ui/ folder.</h1>")
-    return FileResponse(path)
+    return FileResponse(path) if path.exists() else HTMLResponse("<h1>UI 未部署</h1>")
 
-# 预热接口（Render 冷启动后自动调用）
 @app.get("/warmup")
 async def warmup():
     try:
