@@ -184,11 +184,20 @@ async def trigger_pipeline(request: Request):
         result.status = "failed"
         result.error = f"{type(e).__name__}: {str(e)}"
         logger.error(f"[{run_id}] 流程失败: {traceback.format_exc()}")
-    finally:
-        result.elapsed_sec = round(asyncio.get_event_loop().time() - start, 2)
-        # 落盘日志
-        async with aiofiles.open(run_log_path, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
+            finally:
+            result.elapsed_sec = round(asyncio.get_event_loop().time() - start, 2)
+            # 🔧 强容错落盘：即使 JSON 序列化失败，也强制写入原始 dict 防丢失
+            try:
+                log_data = result.model_dump()
+            except Exception:
+                log_data = {"run_id": run_id, "status": result.status, "error": "序列化异常", "elapsed_sec": result.elapsed_sec}
+            try:
+                async with aiofiles.open(run_log_path, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(log_data, ensure_ascii=False, indent=2, default=str))
+                logger.info(f"[{run_id}] 日志已落盘: {run_log_path}")
+            except Exception as e:
+                logger.error(f"[{run_id}] 落盘失败: {e}")
+
             
     return JSONResponse(result.model_dump())
 
