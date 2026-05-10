@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Agent Console v0.13.0</title>
+<style>body{font-family:system-ui;background:#f5f7fa;margin:0;padding:20px;color:#1a1a1a}
+.card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1);margin-bottom:20px}
+h2{margin:0 0 15px;color:#0f62fe}textarea{width:100%;min-height:120px;padding:10px;border:1px solid #d0d5dd;border-radius:8px;font-family:monospace;resize:vertical}
+button{background:#0f62fe;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:500;margin-top:10px}
+button:hover{background:#0353a9}button:disabled{opacity:0.5}
+pre{background:#1e1e1e;color:#d4d4d4;padding:15px;border-radius:8px;overflow-x:auto;max-height:300px}
+.run-item{border-bottom:1px solid #eee;padding:10px 0}.run-item:last-child{border:none}
+.badge{padding:4px 8px;border-radius:4px;font-size:12px;font-weight:bold}
+.success{background:#e6f4ea;color:#1e7e34}failed{background:#fce8e6;color:#c5221f}
+</style></head>
+<body>
+<div class="card"><h2>🚀 Hermes Agent 控制台</h2>
+<label>输入晨读/策划文本：</label><textarea id="inputText" placeholder="在此粘贴原始内容..."></textarea>
+<button id="runBtn" onclick="triggerRun()">▶ 启动工作流</button>
+<div id="status" style="margin-top:10px;color:#666;font-size:14px"></div></div>
+
+<div class="card"><h2>📜 最近运行记录</h2><div id="runsList"><p>暂无记录</p></div></div>
+
+<script>
+async function triggerRun(){
+  const btn=document.getElementById('runBtn');const txt=document.getElementById('inputText').value;
+  if(!txt.trim()){alert('请输入内容');return}
+  btn.disabled=true;btn.textContent='⏳ 执行中...';
+  document.getElementById('status').innerText='正在连接云端 Agent 团队，请稍候（冷启动约30s）...';
+  try{
+    const res=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
+    const data=await res.json();
+    document.getElementById('status').innerHTML=`<span class="badge ${data.status==='success'?'success':'failed'}">${data.status.toUpperCase()}</span> 耗时: ${data.elapsed_sec}s | ID: ${data.run_id}`;
+    if(data.files_exported.length)document.getElementById('status').innerHTML+=`<br>📁 已生成: ${data.files_exported.join(', ')}`;
+    loadRuns();
+  }catch(e){document.getElementById('status').innerText='❌ 请求失败，请检查网络或网关状态';}
+  finally{btn.disabled=false;btn.textContent='▶ 启动工作流';}
+}
+
+async function loadRuns(){
+  try{
+    const res=await fetch('/api/v1/runs');const data=await res.json();
+    const list=document.getElementById('runsList');
+    if(!data.runs.length){list.innerHTML='<p>暂无记录</p>';return}
+    list.innerHTML=data.runs.map(r=>`<div class="run-item">
+      <strong>${r.run_id}</strong> <span class="badge ${r.status==='success'?'success':'failed'}">${r.status}</span>
+      <span style="float:right;font-size:12px;color:#666">${r.elapsed_sec}s</span>
+      ${r.error?`<div style="color:#c5221f;font-size:12px;margin-top:4px">${r.error}</div>`:''}
+      ${r.files_exported.length?`<div style="font-size:12px;margin-top:4px">📁 ${r.files_exported.join(', ')}</div>`:''}
+    </div>`).join('');
+  }catch(e){console.error(e)}
+}
+loadRuns();setInterval(loadRuns,5000);
+</script></body></html>
