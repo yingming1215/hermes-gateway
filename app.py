@@ -132,13 +132,23 @@ async def trigger_pipeline(request: Request):
     result = RunResult(run_id=run_id, status="running")
     
     try:
-        body = await request.json()
-        raw = body.get("text") or body.get("raw_text") or body.get("input_text")
-        if not raw or len(raw) < 10:
+        # 🔧 工业级请求解析：彻底兼容飞书变量注入导致的 JSON 破裂
+        raw_bytes = await request.body()
+        raw_str = raw_bytes.decode("utf-8", errors="ignore").strip()
+        try:
+            body = json.loads(raw_str)
+        except json.JSONDecodeError:
+            # 降级提取：兼容飞书未转义引号/换行符
+            match = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_str)
+            body = {"text": match.group(1).replace('\\"', '"').replace('\\n', '\n')} if match else {"text": raw_str}
+
+        raw = body.get("text") or body.get("raw_text") or body.get("input_text") or raw_str
+        raw_text = str(raw).strip()
+        if len(raw_text) < 10:
             raise ValueError("输入文本过短或为空")
             
-        logger.info(f"[{run_id}] 启动 Curator")
-        result.curator_output = await worker_curator(raw)
+        logger.info(f"[{run_id}] 启动 Curator (输入长度: {len(raw_text)})")
+        result.curator_output = await worker_curator(raw_text)
         
         logger.info(f"[{run_id}] 启动 Formatter")
         result.formatter_output = await worker_formatter(result.curator_output)
