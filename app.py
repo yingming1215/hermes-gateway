@@ -79,13 +79,34 @@ async def call_llm(system_prompt: str, user_prompt: str, timeout: int = 45) -> s
         raise
 
 def parse_json_safe(raw: str) -> Dict:
+    import re
+    if not raw: return {}
+    # 1. 剥离 Markdown 标记与前后杂质
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        parts = cleaned.split("```", 1)
+        cleaned = parts[1].strip() if len(parts) > 1 else cleaned
+        if cleaned.lower().startswith("json"): cleaned = cleaned[4:].strip()
+        if cleaned.endswith("```"): cleaned = cleaned[:-3].strip()
+    
+    # 2. 提取首个完整 {} 块
+    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    target = match.group(0) if match else cleaned
+    
+    # 3. 强解析 + 常见 LLM 错误自愈
     try:
-        cleaned = raw.replace("```json", "").replace("```", "").strip()
-        return json.loads(cleaned)
-    except Exception:
-        import re
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        return json.loads(match.group(0)) if match else {}
+        return json.loads(target)
+    except json.JSONDecodeError:
+        try:
+            # 修复1：替换真实换行为转义符
+            target = target.replace('\n', '\\n').replace('\r', '')
+            # 修复2：剔除尾随逗号（如 ,"key": "val" }）
+            target = re.sub(r',\s*([}\]])', r'\1', target)
+            return json.loads(target)
+        except Exception as e:
+            logger.warning(f"JSON解析失败: {str(e)[:50]} | 原始输出: {raw[:80]}...")
+            return {}  # 兜底返回空字典，绝不让流程崩溃
+
 
 # ================= Agent Worker =================
 async def worker_curator(raw_text: str) -> Dict:
