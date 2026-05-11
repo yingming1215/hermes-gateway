@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<title>Hermes Console v0.13.2</title>
+<title>Hermes Console v0.13.3</title>
 <style>
 body{font-family:system-ui;background:#f8fafc;margin:0;padding:16px;color:#111827}
 .card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:12px}
@@ -10,41 +10,28 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:
 button:hover{background:#1d4ed8}button:disabled{opacity:.5}
 .badge{padding:2px 6px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff}
 .s{background:#10b981}.f{background:#ef4444}.r{background:#f59e0b}
-.run-item{border-bottom:1px solid #e5e7eb;padding:12px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
-.run-item:last-child{border:none}
-.run-info{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.btn-group{display:flex;gap:6px;flex-wrap:wrap}
-.dl-btn{background:#fff;color:#10b981;border:1px solid #10b981;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;transition:0.2s}
-.dl-btn:hover{background:#ecfdf5}
-pre{margin:4px 0 0;padding:8px;background:#0f172a;color:#e2e8f0;font-size:10px;max-height:200px;overflow:auto;white-space:pre-wrap;border-radius:4px}
+.record{border-bottom:1px solid #e5e7eb;padding:12px 0}
+.record:last-child{border:none}
+.record-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.tabs{display:flex;gap:6px;margin-bottom:8px}
+.tab{background:#f1f5f9;border:1px solid #cbd5e1;padding:4px 12px;font-size:12px;border-radius:4px;cursor:pointer}
+.tab.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.preview{background:#fafafa;border:1px solid #e2e8f0;padding:10px;border-radius:6px;max-height:220px;overflow:auto;font-size:12px;white-space:pre-wrap;margin-bottom:8px;min-height:60px}
+.actions{display:flex;gap:6px}
+.act-btn{background:#fff;border:1px solid #94a3b8;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer}
+.act-btn:hover{background:#f8fafc}
+.copy-hint{font-size:10px;color:#64748b;margin-left:4px}
 </style></head>
 <body>
 <div class="card"><h2>🚀 触发工作流</h2><textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea>
 <button id="btn" onclick="go()">▶ 启动</button><div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div></div>
-<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 运行记录 (v0.13.2)</h2>
+<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 预览工作台 (v0.13.3)</h2>
 <button style="background:#fff;color:#2563eb;border:1px solid #2563eb" onclick="load()">🔄 刷新</button></div>
 <div class="card" style="padding-top:0"><div id="list"><p style="color:#94a3b8;font-size:12px">加载中...</p></div></div>
 
 <script>
-// 全局安全数据池（彻底避开 innerHTML 转义陷阱）
 window.runsData = {};
-
-function downloadContent(runId, type) {
-  const run = window.runsData[runId];
-  if (!run || !run.formatter_output) return alert('数据缺失，请刷新重试');
-  const f = run.formatter_output;
-  let content = '', filename = '';
-  if (type === 'douyin') { content = f.douyin_script || ''; filename = `${runId}_douyin.md`; }
-  else if (type === 'oa') { content = f.oa_long_article || ''; filename = `${runId}_oa.md`; }
-  else if (type === 'video') { content = JSON.stringify(f.video_short || [], null, 2); filename = `${runId}_video.json`; }
-  if (!content) return alert('该模块未生成内容');
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-}
+let activeTabs = {};
 
 async function go() {
   const b = document.getElementById('btn'), t = document.getElementById('txt').value;
@@ -67,48 +54,108 @@ async function load() {
     const r = await fetch('/api/v1/runs?t=' + Date.now());
     const data = await r.json();
     if (!data.runs?.length) { listEl.innerHTML = '<p style="color:#94a3b8;font-size:12px">暂无记录</p>'; return; }
-    
-    listEl.innerHTML = ''; // 清空旧节点
-    window.runsData = {};  // 重置数据池
-    
+    listEl.innerHTML = '';
+    window.runsData = {};
+    activeTabs = {};
+
     data.runs.forEach(run => {
       window.runsData[run.run_id] = run;
-      const item = document.createElement('div');
-      item.className = 'run-item';
-      
-      const info = document.createElement('div');
-      info.className = 'run-info';
-      info.innerHTML = `<span class="badge ${run.status==='success'?'s':(run.status==='failed'?'f':'r')}">${run.status.toUpperCase()}</span><span style="font-size:12px;color:#64748b">${run.run_id} (${run.elapsed_sec}s)</span>`;
-      
-      const btnGroup = document.createElement('div');
-      btnGroup.className = 'btn-group';
-      
-      if (run.formatter_output?.douyin_script) {
-        const btn = document.createElement('button'); btn.className = 'dl-btn'; btn.textContent = '⬇️ 抖音稿';
-        btn.onclick = () => downloadContent(run.run_id, 'douyin');
-        btnGroup.appendChild(btn);
-      }
-      if (run.formatter_output?.oa_long_article) {
-        const btn = document.createElement('button'); btn.className = 'dl-btn'; btn.textContent = '⬇️ 公众号';
-        btn.onclick = () => downloadContent(run.run_id, 'oa');
-        btnGroup.appendChild(btn);
-      }
-      if (run.formatter_output?.video_short) {
-        const btn = document.createElement('button'); btn.className = 'dl-btn'; btn.textContent = '⬇️ 分镜表';
-        btn.onclick = () => downloadContent(run.run_id, 'video');
-        btnGroup.appendChild(btn);
-      }
-      if (btnGroup.children.length === 0) {
-        btnGroup.innerHTML = '<span style="font-size:11px;color:#94a3b8">无可用文件</span>';
-      }
-      
-      item.appendChild(info);
-      item.appendChild(btnGroup);
-      listEl.appendChild(item);
+      activeTabs[run.run_id] = 'douyin'; // 默认抖音
+
+      const el = document.createElement('div');
+      el.className = 'record';
+      el.dataset.runId = run.run_id;
+
+      // Header
+      const hdr = document.createElement('div');
+      hdr.className = 'record-header';
+      hdr.innerHTML = `<span class="badge ${run.status==='success'?'s':(run.status==='failed'?'f':'r')}">${run.status.toUpperCase()}</span><span style="font-size:12px;color:#64748b">${run.run_id} (${run.elapsed_sec}s)</span>`;
+      el.appendChild(hdr);
+
+      // Tabs
+      const tabs = document.createElement('div');
+      tabs.className = 'tabs';
+      ['douyin','oa','video'].forEach(type => {
+        const btn = document.createElement('button');
+        btn.className = `tab ${activeTabs[run.run_id]===type?'active':''}`;
+        btn.textContent = {douyin:'📱 抖音稿', oa:'📄 公众号', video:'🎬 分镜表'}[type];
+        btn.onclick = () => switchTab(run.run_id, type);
+        tabs.appendChild(btn);
+      });
+      el.appendChild(tabs);
+
+      // Preview
+      const preview = document.createElement('div');
+      preview.className = 'preview';
+      preview.id = `preview-${run.run_id}`;
+      updatePreview(run.run_id);
+      el.appendChild(preview);
+
+      // Actions
+      const acts = document.createElement('div');
+      acts.className = 'actions';
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'act-btn'; copyBtn.textContent = '📋 复制内容';
+      copyBtn.onclick = () => copyToClipboard(run.run_id);
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'act-btn'; dlBtn.textContent = '⬇️ 下载文件';
+      dlBtn.onclick = () => triggerDownload(run.run_id);
+      acts.appendChild(copyBtn); acts.appendChild(dlBtn);
+      el.appendChild(acts);
+
+      listEl.appendChild(el);
     });
-  } catch (e) {
-    listEl.innerHTML = `<p style="color:#ef4444;font-size:12px">加载失败: ${e.message}</p>`;
-  }
+  } catch (e) { listEl.innerHTML = `<p style="color:#ef4444;font-size:12px">加载失败: ${e.message}</p>`; }
+}
+
+function switchTab(runId, type) {
+  activeTabs[runId] = type;
+  const record = document.querySelector(`[data-run-id="${runId}"]`);
+  record.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  record.querySelectorAll('.tab').forEach(t => {
+    if ((t.textContent.includes('抖音') && type==='douyin') || 
+        (t.textContent.includes('公众') && type==='oa') || 
+        (t.textContent.includes('分镜') && type==='video')) t.classList.add('active');
+  });
+  updatePreview(runId);
+}
+
+function updatePreview(runId) {
+  const run = window.runsData[runId];
+  const f = run.formatter_output || {};
+  const type = activeTabs[runId];
+  const content = type === 'douyin' ? f.douyin_script : (type === 'oa' ? f.oa_long_article : JSON.stringify(f.video_short||[], null, 2));
+  document.getElementById(`preview-${runId}`).textContent = content || '(该模块未生成内容)';
+}
+
+async function copyToClipboard(runId) {
+  const run = window.runsData[runId];
+  const f = run.formatter_output || {};
+  const type = activeTabs[runId];
+  const content = type === 'douyin' ? f.douyin_script : (type === 'oa' ? f.oa_long_article : JSON.stringify(f.video_short||[], null, 2));
+  if (!content) return alert('无内容可复制');
+  try {
+    await navigator.clipboard.writeText(content);
+    alert('✅ 已复制到剪贴板，可直接粘贴至 Obsidian/平台后台');
+  } catch { alert('❌ 浏览器限制，请手动选中文本复制'); }
+}
+
+function triggerDownload(runId) {
+  const run = window.runsData[runId];
+  const f = run.formatter_output || {};
+  const type = activeTabs[runId];
+  let content = '', ext = 'md', label = '';
+  if (type === 'douyin') { content = f.douyin_script; label = '抖音口播稿'; }
+  else if (type === 'oa') { content = f.oa_long_article; label = '公众号长文'; }
+  else if (type === 'video') { content = JSON.stringify(f.video_short||[], null, 2); ext = 'json'; label = '分镜表'; }
+  if (!content) return alert('无内容可下载');
+  
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${runId}_${label}.${ext}`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 window.onload = load;
 </script></body></html>
