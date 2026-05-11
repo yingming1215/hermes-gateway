@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<title>Hermes Console v0.13.3</title>
+<title>Hermes Console v0.13.4</title>
 <style>
 body{font-family:system-ui;background:#f8fafc;margin:0;padding:16px;color:#111827}
 .card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:12px}
@@ -14,24 +14,23 @@ button:hover{background:#1d4ed8}button:disabled{opacity:.5}
 .record:last-child{border:none}
 .record-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .tabs{display:flex;gap:6px;margin-bottom:8px}
-.tab{background:#f1f5f9;border:1px solid #cbd5e1;padding:4px 12px;font-size:12px;border-radius:4px;cursor:pointer}
-.tab.active{background:#2563eb;color:#fff;border-color:#2563eb}
-.preview{background:#fafafa;border:1px solid #e2e8f0;padding:10px;border-radius:6px;max-height:220px;overflow:auto;font-size:12px;white-space:pre-wrap;margin-bottom:8px;min-height:60px}
+.tab{background:#f1f5f9;border:1px solid #cbd5e1;padding:4px 12px;font-size:12px;border-radius:4px;cursor:pointer;transition:0.15s}
+.tab:hover{background:#e2e8f0}.tab.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.preview{background:#fafafa;border:1px solid #e2e8f0;padding:10px;border-radius:6px;max-height:220px;overflow:auto;font-size:12px;white-space:pre-wrap;margin-bottom:8px;min-height:60px;line-height:1.5}
 .actions{display:flex;gap:6px}
-.act-btn{background:#fff;border:1px solid #94a3b8;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer}
+.act-btn{background:#fff;border:1px solid #94a3b8;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;transition:0.15s}
 .act-btn:hover{background:#f8fafc}
-.copy-hint{font-size:10px;color:#64748b;margin-left:4px}
 </style></head>
 <body>
 <div class="card"><h2>🚀 触发工作流</h2><textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea>
 <button id="btn" onclick="go()">▶ 启动</button><div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div></div>
-<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 预览工作台 (v0.13.3)</h2>
+<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 预览工作台 (v0.13.4)</h2>
 <button style="background:#fff;color:#2563eb;border:1px solid #2563eb" onclick="load()">🔄 刷新</button></div>
 <div class="card" style="padding-top:0"><div id="list"><p style="color:#94a3b8;font-size:12px">加载中...</p></div></div>
 
 <script>
 window.runsData = {};
-let activeTabs = {};
+window.activeTabs = {};
 
 async function go() {
   const b = document.getElementById('btn'), t = document.getElementById('txt').value;
@@ -56,42 +55,44 @@ async function load() {
     if (!data.runs?.length) { listEl.innerHTML = '<p style="color:#94a3b8;font-size:12px">暂无记录</p>'; return; }
     listEl.innerHTML = '';
     window.runsData = {};
-    activeTabs = {};
+    window.activeTabs = {};
 
     data.runs.forEach(run => {
       window.runsData[run.run_id] = run;
-      activeTabs[run.run_id] = 'douyin'; // 默认抖音
+      window.activeTabs[run.run_id] = 'douyin';
 
       const el = document.createElement('div');
       el.className = 'record';
       el.dataset.runId = run.run_id;
 
-      // Header
+      // 1. Header
       const hdr = document.createElement('div');
       hdr.className = 'record-header';
       hdr.innerHTML = `<span class="badge ${run.status==='success'?'s':(run.status==='failed'?'f':'r')}">${run.status.toUpperCase()}</span><span style="font-size:12px;color:#64748b">${run.run_id} (${run.elapsed_sec}s)</span>`;
       el.appendChild(hdr);
 
-      // Tabs
+      // 2. Tabs
       const tabs = document.createElement('div');
       tabs.className = 'tabs';
       ['douyin','oa','video'].forEach(type => {
         const btn = document.createElement('button');
-        btn.className = `tab ${activeTabs[run.run_id]===type?'active':''}`;
+        btn.className = `tab ${type==='douyin'?'active':''}`;
         btn.textContent = {douyin:'📱 抖音稿', oa:'📄 公众号', video:'🎬 分镜表'}[type];
+        btn.dataset.type = type;
         btn.onclick = () => switchTab(run.run_id, type);
         tabs.appendChild(btn);
       });
       el.appendChild(tabs);
 
-      // Preview
+      // 3. Preview (安全直写，避开 getElementById 竞态)
+      const f = run.formatter_output || {};
+      const initialContent = f.douyin_script || '(该模块未生成内容)';
       const preview = document.createElement('div');
       preview.className = 'preview';
-      preview.id = `preview-${run.run_id}`;
-      updatePreview(run.run_id);
+      preview.textContent = initialContent;
       el.appendChild(preview);
 
-      // Actions
+      // 4. Actions
       const acts = document.createElement('div');
       acts.className = 'actions';
       const copyBtn = document.createElement('button');
@@ -103,47 +104,48 @@ async function load() {
       acts.appendChild(copyBtn); acts.appendChild(dlBtn);
       el.appendChild(acts);
 
-      listEl.appendChild(el);
+      listEl.appendChild(el); // ⚠️ 必须先挂载 DOM，再绑定后续交互
     });
   } catch (e) { listEl.innerHTML = `<p style="color:#ef4444;font-size:12px">加载失败: ${e.message}</p>`; }
 }
 
 function switchTab(runId, type) {
-  activeTabs[runId] = type;
+  window.activeTabs[runId] = type;
   const record = document.querySelector(`[data-run-id="${runId}"]`);
-  record.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  record.querySelectorAll('.tab').forEach(t => {
-    if ((t.textContent.includes('抖音') && type==='douyin') || 
-        (t.textContent.includes('公众') && type==='oa') || 
-        (t.textContent.includes('分镜') && type==='video')) t.classList.add('active');
-  });
-  updatePreview(runId);
-}
-
-function updatePreview(runId) {
+  if (!record) return;
+  
+  // 切换 Tab 样式
+  record.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === type));
+  
+  // 切换预览内容
+  const preview = record.querySelector('.preview');
   const run = window.runsData[runId];
   const f = run.formatter_output || {};
-  const type = activeTabs[runId];
-  const content = type === 'douyin' ? f.douyin_script : (type === 'oa' ? f.oa_long_article : JSON.stringify(f.video_short||[], null, 2));
-  document.getElementById(`preview-${runId}`).textContent = content || '(该模块未生成内容)';
+  let content = '(该模块未生成内容)';
+  if (type === 'douyin') content = f.douyin_script || content;
+  else if (type === 'oa') content = f.oa_long_article || content;
+  else if (type === 'video') content = f.video_short ? JSON.stringify(f.video_short, null, 2) : content;
+  preview.textContent = content;
 }
 
 async function copyToClipboard(runId) {
+  const type = window.activeTabs[runId];
   const run = window.runsData[runId];
+  if (!run) return;
   const f = run.formatter_output || {};
-  const type = activeTabs[runId];
-  const content = type === 'douyin' ? f.douyin_script : (type === 'oa' ? f.oa_long_article : JSON.stringify(f.video_short||[], null, 2));
+  let content = type === 'douyin' ? f.douyin_script : (type === 'oa' ? f.oa_long_article : JSON.stringify(f.video_short||[], null, 2));
   if (!content) return alert('无内容可复制');
   try {
     await navigator.clipboard.writeText(content);
     alert('✅ 已复制到剪贴板，可直接粘贴至 Obsidian/平台后台');
-  } catch { alert('❌ 浏览器限制，请手动选中文本复制'); }
+  } catch { alert('❌ 浏览器限制，请手动选中文本 Ctrl+C'); }
 }
 
 function triggerDownload(runId) {
+  const type = window.activeTabs[runId];
   const run = window.runsData[runId];
+  if (!run) return;
   const f = run.formatter_output || {};
-  const type = activeTabs[runId];
   let content = '', ext = 'md', label = '';
   if (type === 'douyin') { content = f.douyin_script; label = '抖音口播稿'; }
   else if (type === 'oa') { content = f.oa_long_article; label = '公众号长文'; }
