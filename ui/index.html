@@ -9,11 +9,12 @@ button:hover{background:#1d4ed8}button:disabled{opacity:.5}
 .badge{padding:2px 6px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff}
 .s{background:#10b981}.f{background:#ef4444}.r{background:#f59e0b}
 details{margin-top:8px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
-summary{padding:8px 10px;cursor:pointer;background:#f8fafc;font-size:12px;font-weight:500;user-select:none;display:flex;justify-content:space-between;align-items:center}
-.summary-content{display:flex;gap:8px;align-items:center}
-pre{margin:0;padding:10px;background:#0f172a;color:#e2e8f0;font-size:11px;max-height:250px;overflow:auto;white-space:pre-wrap}
-.dl-btn{background:#fff;color:#10b981;border:1px solid #10b981;padding:2px 8px;font-size:11px;border-radius:4px;cursor:pointer;text-decoration:none;margin-left:8px}
-.dl-btn:hover{background:#ecfdf5}</style></head>
+summary{padding:10px;cursor:pointer;background:#f8fafc;font-size:13px;font-weight:500;display:flex;justify-content:space-between;align-items:center}
+.summary-main{flex:1;display:flex;gap:10px;align-items:center}
+.btn-group{display:flex;gap:6px}
+.dl{background:#fff;color:#10b981;border:1px solid #10b981;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.dl:hover{background:#ecfdf5}
+pre{margin:0;padding:10px;background:#0f172a;color:#e2e8f0;font-size:11px;max-height:250px;overflow:auto;white-space:pre-wrap}</style></head>
 <body>
 <div class="card"><h2>🚀 触发工作流</h2><textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea>
 <button id="btn" onclick="go()">▶ 启动</button><div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div></div>
@@ -26,29 +27,27 @@ async function go(){
   if(!t.trim())return alert('请输入内容');
   b.disabled=true;b.textContent='⏳ 处理中...';
   document.getElementById('st').innerHTML='<span style="color:#2563eb">冷启动约30s...</span>';
-  try{
-    const r=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
-    const d=await r.json();
-    document.getElementById('st').innerHTML=`<span class="badge ${d.status==='success'?'s':(d.status==='failed'?'f':'r')}">${d.status.toUpperCase()}</span> ${d.elapsed_sec}s`;
-    load();
-  }catch(e){document.getElementById('st').innerText='❌ 请求失败'}
+  try{const r=await fetch('/api/v1/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});const d=await r.json();
+  document.getElementById('st').innerHTML=`<span class="badge ${d.status==='success'?'s':(d.status==='failed'?'f':'r')}">${d.status.toUpperCase()}</span> ${d.elapsed_sec}s`;load();}
+  catch(e){document.getElementById('st').innerText='❌ 请求失败'}
   finally{b.disabled=false;b.textContent='▶ 启动'}
 }
-function download(name,content){
-  const blob=new Blob([content],{type:'text/markdown'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();URL.revokeObjectURL(a.href);
+function dl(name,content){
+  const a=document.createElement('a');a.href='data:text/markdown;charset=utf-8,'+encodeURIComponent(content);
+  a.download=name;a.style.display='none';document.body.appendChild(a);a.click();document.body.removeChild(a);
 }
 async function load(){
   try{
     const r=await fetch('/api/v1/runs?nocache='+Date.now()),d=await r.json();const l=document.getElementById('list');
     if(!d.runs?.length){l.innerHTML='<p style="color:#94a3b8;font-size:12px">暂无记录</p>';return}
     l.innerHTML=d.runs.map(x=>{
-      const f=x.formatter_output||{};
-      const files=[];
-      if(f.douyin_script) files.push(`<a class="dl-btn" onclick="download('${x.run_id}_douyin.md',\`${f.douyin_script.replace(/`/g,'\\`')}\`)">⬇️ 抖音稿</a>`);
-      if(f.oa_long_article) files.push(`<a class="dl-btn" onclick="download('${x.run_id}_oa.md',\`${f.oa_long_article.replace(/`/g,'\\`')}\`)">⬇️ 公众号</a>`);
-      if(f.video_short) files.push(`<a class="dl-btn" onclick="download('${x.run_id}_video.json',\`${JSON.stringify(f.video_short,null,2)}\`)">⬇️ 分镜表</a>`);
-      return `<details><summary><div class="summary-content"><span class="badge ${x.status==='success'?'s':(x.status==='failed'?'f':'r')}">${x.status}</span> ${x.run_id} (${x.elapsed_sec}s) ${files.join('')}</div></summary><pre>${JSON.stringify(x,null,2)}</pre></details>`;
+      try{
+        const f=x.formatter_output||{};let btns='';
+        if(f.douyin_script) btns+=`<a class="dl" onclick="dl('${x.run_id}_douyin.md','${encodeURIComponent(f.douyin_script)}')">⬇️ 抖音</a>`;
+        if(f.oa_long_article) btns+=`<a class="dl" onclick="dl('${x.run_id}_oa.md','${encodeURIComponent(f.oa_long_article)}')">⬇️ 公众号</a>`;
+        if(f.video_short) btns+=`<a class="dl" onclick="dl('${x.run_id}_video.json','${encodeURIComponent(JSON.stringify(f.video_short,null,2))}')">⬇️ 分镜</a>`;
+        return `<details><summary><div class="summary-main"><span class="badge ${x.status==='success'?'s':(x.status==='failed'?'f':'r')}">${x.status}</span>${x.run_id} (${x.elapsed_sec}s)</div><div class="btn-group">${btns}</div></summary><pre>${JSON.stringify(x,null,2)}</pre></details>`;
+      }catch(e){return `<details><summary><span class="badge f">解析异常</span> ${x.run_id||'?'}</summary><pre>渲染失败</pre></details>`}
     }).join('');
   }catch(e){console.error(e)}
 }
