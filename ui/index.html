@@ -1,7 +1,6 @@
 <!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<title>Hermes Console v0.13.1</title>
+<title>Hermes Console v0.13.2</title>
 <style>
 body{font-family:system-ui;background:#f8fafc;margin:0;padding:16px;color:#111827}
 .card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:12px}
@@ -11,44 +10,40 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:
 button:hover{background:#1d4ed8}button:disabled{opacity:.5}
 .badge{padding:2px 6px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff}
 .s{background:#10b981}.f{background:#ef4444}.r{background:#f59e0b}
-details{margin-top:8px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
-summary{padding:10px;cursor:pointer;background:#f8fafc;font-size:13px;font-weight:500;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
-.summary-info{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.summary-actions{display:flex;gap:6px}
+.run-item{border-bottom:1px solid #e5e7eb;padding:12px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.run-item:last-child{border:none}
+.run-info{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap}
 .dl-btn{background:#fff;color:#10b981;border:1px solid #10b981;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;transition:0.2s}
 .dl-btn:hover{background:#ecfdf5}
-pre{margin:0;padding:10px;background:#0f172a;color:#e2e8f0;font-size:11px;max-height:250px;overflow:auto;white-space:pre-wrap}
+pre{margin:4px 0 0;padding:8px;background:#0f172a;color:#e2e8f0;font-size:10px;max-height:200px;overflow:auto;white-space:pre-wrap;border-radius:4px}
 </style></head>
 <body>
 <div class="card"><h2>🚀 触发工作流</h2><textarea id="txt" placeholder="粘贴晨读/策划内容..."></textarea>
 <button id="btn" onclick="go()">▶ 启动</button><div id="st" style="margin-top:6px;font-size:12px;color:#64748b"></div></div>
-<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 运行记录 (v0.13.1)</h2>
+<div class="card" style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📜 运行记录 (v0.13.2)</h2>
 <button style="background:#fff;color:#2563eb;border:1px solid #2563eb" onclick="load()">🔄 刷新</button></div>
 <div class="card" style="padding-top:0"><div id="list"><p style="color:#94a3b8;font-size:12px">加载中...</p></div></div>
 
 <script>
-// 全局安全存储区，避免内容转义冲突
-window.HermesData = {};
+// 全局安全数据池（彻底避开 innerHTML 转义陷阱）
+window.runsData = {};
 
-// 安全下载函数（浏览器本地生成 Blob，彻底绕过服务端临时目录）
-function triggerDownload(runId, type) {
-  const run = window.HermesData[runId];
-  if (!run || !run.formatter_output) return alert('数据缺失');
+function downloadContent(runId, type) {
+  const run = window.runsData[runId];
+  if (!run || !run.formatter_output) return alert('数据缺失，请刷新重试');
   const f = run.formatter_output;
-  let content = '', ext = 'md';
-  
-  if (type === 'douyin') { content = f.douyin_script || ''; }
-  else if (type === 'oa') { content = f.oa_long_article || ''; }
-  else if (type === 'video') { content = JSON.stringify(f.video_short || [], null, 2); ext = 'json'; }
-  
-  if (!content) return alert('该模块未生成内容，请检查 Formatter 输出');
-  
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  let content = '', filename = '';
+  if (type === 'douyin') { content = f.douyin_script || ''; filename = `${runId}_douyin.md`; }
+  else if (type === 'oa') { content = f.oa_long_article || ''; filename = `${runId}_oa.md`; }
+  else if (type === 'video') { content = JSON.stringify(f.video_short || [], null, 2); filename = `${runId}_video.json`; }
+  if (!content) return alert('该模块未生成内容');
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `${runId}_${type}.${ext}`;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 async function go() {
@@ -66,41 +61,53 @@ async function go() {
 }
 
 async function load() {
+  const listEl = document.getElementById('list');
+  listEl.innerHTML = '<p style="color:#94a3b8;font-size:12px">同步中...</p>';
   try {
     const r = await fetch('/api/v1/runs?t=' + Date.now());
     const data = await r.json();
-    const list = document.getElementById('list');
-    if (!data.runs?.length) { list.innerHTML = '<p style="color:#94a3b8;font-size:12px">暂无记录</p>'; return; }
-
-    // 清空旧数据防累积
-    window.HermesData = {};
-    let html = '';
+    if (!data.runs?.length) { listEl.innerHTML = '<p style="color:#94a3b8;font-size:12px">暂无记录</p>'; return; }
+    
+    listEl.innerHTML = ''; // 清空旧节点
+    window.runsData = {};  // 重置数据池
     
     data.runs.forEach(run => {
-      window.HermesData[run.run_id] = run; // 存入安全区
-      const btns = [];
-      if (run.formatter_output?.douyin_script) 
-        btns.push(`<button class="dl-btn" onclick="triggerDownload('${run.run_id}','douyin')">⬇️ 抖音稿</button>`);
-      if (run.formatter_output?.oa_long_article) 
-        btns.push(`<button class="dl-btn" onclick="triggerDownload('${run.run_id}','oa')">⬇️ 公众号</button>`);
-      if (run.formatter_output?.video_short) 
-        btns.push(`<button class="dl-btn" onclick="triggerDownload('${run.run_id}','video')">⬇️ 分镜表</button>`);
+      window.runsData[run.run_id] = run;
+      const item = document.createElement('div');
+      item.className = 'run-item';
       
-      html += `<details>
-        <summary>
-          <div class="summary-info">
-            <span class="badge ${run.status==='success'?'s':(run.status==='failed'?'f':'r')}">${run.status.toUpperCase()}</span>
-            <span style="font-size:12px;color:#64748b">${run.run_id} (${run.elapsed_sec}s)</span>
-          </div>
-          <div class="summary-actions">${btns.join('')}</div>
-        </summary>
-        <pre>${JSON.stringify(run, null, 2)}</pre>
-      </details>`;
+      const info = document.createElement('div');
+      info.className = 'run-info';
+      info.innerHTML = `<span class="badge ${run.status==='success'?'s':(run.status==='failed'?'f':'r')}">${run.status.toUpperCase()}</span><span style="font-size:12px;color:#64748b">${run.run_id} (${run.elapsed_sec}s)</span>`;
+      
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'btn-group';
+      
+      if (run.formatter_output?.douyin_script) {
+        const btn = document.createElement('button'); btn.className = 'dl-btn'; btn.textContent = '⬇️ 抖音稿';
+        btn.onclick = () => downloadContent(run.run_id, 'douyin');
+        btnGroup.appendChild(btn);
+      }
+      if (run.formatter_output?.oa_long_article) {
+        const btn = document.createElement('button'); btn.className = 'dl-btn'; btn.textContent = '⬇️ 公众号';
+        btn.onclick = () => downloadContent(run.run_id, 'oa');
+        btnGroup.appendChild(btn);
+      }
+      if (run.formatter_output?.video_short) {
+        const btn = document.createElement('button'); btn.className = 'dl-btn'; btn.textContent = '⬇️ 分镜表';
+        btn.onclick = () => downloadContent(run.run_id, 'video');
+        btnGroup.appendChild(btn);
+      }
+      if (btnGroup.children.length === 0) {
+        btnGroup.innerHTML = '<span style="font-size:11px;color:#94a3b8">无可用文件</span>';
+      }
+      
+      item.appendChild(info);
+      item.appendChild(btnGroup);
+      listEl.appendChild(item);
     });
-    list.innerHTML = html;
   } catch (e) {
-    console.error(e);
-    document.getElementById('list').innerHTML = `<p style="color:#ef4444">加载异常: ${e.message}</p>`;
+    listEl.innerHTML = `<p style="color:#ef4444;font-size:12px">加载失败: ${e.message}</p>`;
   }
 }
 window.onload = load;
